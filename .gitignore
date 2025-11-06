@@ -47,3 +47,16 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+
+# Imported data
+data/imported/
+
+# Processed data
+data/processed/
+
+# Outputs
+output/
+
+#DS_store
+*.DS_Store
