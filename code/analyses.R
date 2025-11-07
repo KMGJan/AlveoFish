@@ -1,4 +1,23 @@
-library(tidyverse)
+#!/usr/bin/env Rscript
+
+# Set up the working directory
+if (!dir.exists(file.path("data", "imported")))
+  dir.create(file.path("data", "imported"))
+if (!dir.exists(file.path("data", "processed")))
+  dir.create(file.path("data", "processed"))
+if (!dir.exists(file.path("output", "figure")))
+  dir.create(file.path("output", "figure"), recursive = TRUE)
+if (!dir.exists(file.path("output", "table")))
+  dir.create(file.path("output", "table"))
+
+# Function that check if the package exist, or it will download it, and then load the library
+load_or_install <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+  suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+}
+load_or_install("tidyverse")
 
 # Import the data ----
 asv_table <- read_csv(
@@ -48,12 +67,13 @@ rm(asv_table, metadata)
 
 # Plot map ----
 # Get the ices shapefile dataset for the Baltic Sea
-## Dowload the shapefile data if not downloaded yet
+## Download the shapefile data if not downloaded yet
 if (
   !dir.exists(file.path("data", "imported", "ICES_areas")) |
     !dir.exists(file.path("data", "imported", "ICES_rectangles")) |
     !dir.exists(file.path("data", "imported", "HELCOM_subbasins"))
 ) {
+  message("Downloading shapefiles for the map")
   # 1. ICES Areas
   # The URL for getting the data for ICES areas
   areas_url <- "https://gis.ices.dk/shapefiles/ICES_areas.zip"
@@ -104,7 +124,8 @@ if (
 }
 
 # Process shapefile data
-suppressPackageStartupMessages(library(sf))
+load_or_install("sf")
+message("Plotting the map")
 baltic_sea_shp <-
   read_sf(list.files(
     file.path("data", "imported", "ICES_areas"),
@@ -169,8 +190,18 @@ map <-
     plot.background = element_rect(fill = "white", color = NA)
   )
 # Save
-ggsave(filename = file.path("output", "map.pdf"), plot = map)
-ggsave(filename = file.path("output", "map.png"), plot = map)
+ggsave(
+  filename = file.path("output", "figure", "map.pdf"),
+  plot = map,
+  width = 7,
+  height = 7
+)
+ggsave(
+  filename = file.path("output", "figure", "map.png"),
+  plot = map,
+  width = 7,
+  height = 7
+)
 
 # Detach packages and files not needed anymore
 rm(
@@ -185,6 +216,7 @@ detach("package:sf", unload = TRUE)
 
 # Analyse the DNA data ----
 # Transform read count to relative abundance
+message("Analysing DNA data")
 fish_data <-
   dna_data |>
   filter(organism != "WP2", !is.na(library_ID), Abundance > 0) |>
@@ -196,7 +228,14 @@ fish_data <-
     tibble(month_abb = month.abb, month = 1:12),
     by = join_by(month)
   ) |>
-  mutate(survey = paste(month_abb, year))
+  mutate(survey = paste(month_abb, year)) |>
+  # remove fish reads
+  filter(Family != "Teleostei") |>
+  # filter out the samples with less than 10'000 reads
+  group_by(library_ID) |>
+  filter(sum(Abundance) > 10000) |>
+  ungroup()
+
 ## Metazoans vs non-metazoans ----
 summary_metazoa <- fish_data |>
   mutate(diet = case_when(Subdivision == "Metazoa" ~ TRUE, .default = FALSE)) |>
@@ -249,23 +288,27 @@ metazoa_prop <-
   theme(panel.grid = element_blank())
 ggsave(
   plot = metazoa_prop,
-  filename = file.path("output", "metazoa_prop.pdf"),
+  filename = file.path("output", "figure", "metazoa_prop.pdf"),
   width = 6,
   height = 4
 )
 
-## Focus on the non-metazoans
+## Focus on the non-metazoans ----
 nonmetazoan_data <- fish_data |>
   mutate(diet = case_when(Subdivision == "Metazoa" ~ TRUE, .default = FALSE)) |>
   filter(diet == FALSE)
-barplot_non_metazoan_rra <-
+
+summary_non_metazoan <-
   nonmetazoan_data |>
-  group_by(organism, survey, Division, Subdivision, library_ID) |>
+  group_by(organism, survey, Division, library_ID) |>
   summarise(rra = sum(rra), .groups = "drop_last") |>
   summarise(rra = mean(rra), .groups = "drop") |>
   group_by(organism, survey) |>
   mutate(rra = rra / sum(rra)) |>
-  ungroup() |>
+  ungroup()
+
+barplot_non_metazoan_rra <-
+  summary_non_metazoan |>
   ggplot(aes(x = organism, y = rra, fill = Division)) +
   geom_bar(stat = "identity") +
   facet_grid(. ~ survey) +
@@ -280,7 +323,358 @@ barplot_non_metazoan_rra <-
   labs(x = NULL, y = "RRA")
 ggsave(
   plot = barplot_non_metazoan_rra,
-  filename = file.path("output", "barplot_non_metazoan_rra.pdf"),
+  filename = file.path("output", "figure", "barplot_non_metazoan_rra.pdf"),
   width = 7,
   height = 5
+)
+
+summary_non_metazoan |>
+  mutate(rra = round(rra, 3)) |>
+  pivot_wider(names_from = Division, values_from = rra, values_fill = 0) |>
+  write_csv(file = file.path("output", "table", "non_metazoan_division.csv"))
+
+## Zoom in alveolata ----
+alveolata_data <-
+  nonmetazoan_data |>
+  # Fill taxonomy so there is no NA
+  mutate(
+    Subdivision = ifelse(
+      is.na(Subdivision),
+      paste(Division, "x", sep = "_"),
+      Subdivision
+    ),
+    Class = ifelse(is.na(Class), paste(Subdivision, "x", sep = "_"), Class),
+    Order = ifelse(is.na(Order), paste(Class, "x", sep = "_"), Order)
+  ) |>
+  # Only keep the division Alveolata
+  filter(Division == "Alveolata") |>
+  # Compute the relative read abundance
+  group_by(organism, survey, Order, library_ID) |>
+  summarise(rra = sum(rra), .groups = "drop") |>
+  group_by(library_ID) |>
+  mutate(rra = rra / sum(rra)) |>
+  ungroup()
+
+## Frequency of occurrence ----
+alveolata_foo <-
+  alveolata_data |>
+  # Ensure that when the taxa is not detected, the value is 0
+  pivot_wider(names_from = Order, values_from = rra, values_fill = 0) |>
+  pivot_longer(
+    cols = where(is.numeric),
+    values_to = "rra",
+    names_to = "Order"
+  ) |>
+  # Logically assign if the rra is larger that 0, it is considered as detected
+  mutate(detected = case_when(rra > 0 ~ 1, .default = 0)) |>
+  # And summarise the data
+  group_by(organism, survey, Order) |>
+  summarise(foo = sum(detected) / n_distinct(library_ID), .groups = "drop")
+
+# Plot the frequency of occurrence
+alveolata_foo_plot <-
+  alveolata_foo |>
+  ggplot(aes(x = organism, y = Order, fill = foo * 100)) +
+  geom_tile(col = "black") +
+  scale_fill_viridis_c(name = "FOO (%)") +
+  facet_grid(. ~ survey) +
+  coord_fixed() +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(color = "black", fill = NA)
+  ) +
+  labs(x = NULL, y = NULL)
+ggsave(
+  filename = file.path("output", "figure", "order_foo.pdf"),
+  plot = alveolata_foo_plot,
+  width = 5,
+  height = 6
+)
+
+# Combine average rra with foo for plotting the costello-plot
+alveolata_summary <-
+  nonmetazoan_data |>
+  mutate(
+    Subdivision = ifelse(
+      is.na(Subdivision),
+      paste(Division, "x", sep = "_"),
+      Subdivision
+    ),
+    Class = ifelse(is.na(Class), paste(Subdivision, "x", sep = "_"), Class),
+    Order = ifelse(is.na(Order), paste(Class, "x", sep = "_"), Order)
+  ) |>
+  filter(Division == "Alveolata") |>
+  group_by(organism, survey, Order, library_ID) |>
+  summarise(rra = sum(rra), .groups = "drop_last") |>
+  summarise(rra = mean(rra), .groups = "drop") |>
+  group_by(organism, survey) |>
+  mutate(rra = rra / sum(rra)) |>
+  ungroup() |>
+  pivot_wider(names_from = Order, values_from = rra, values_fill = 0) |>
+  pivot_longer(
+    cols = where(is.numeric),
+    names_to = "Order",
+    values_to = "rra"
+  ) |>
+  left_join(alveolata_foo, by = join_by(organism, survey, Order))
+
+# Create a data frame with labels for the taxa that have a rra > 0.5 or a foo > 0.5
+label_df <-
+  alveolata_summary |>
+  filter(rra > 0.5 | foo > 0.5) |>
+  select(Order) |>
+  unique() |>
+  arrange(Order) |>
+  mutate(label = row_number()) |>
+  right_join(
+    alveolata_summary |>
+      filter(rra > 0.5 | foo > 0.5),
+    by = join_by(Order)
+  )
+
+load_or_install("ggrepel")
+
+# Plot the costello-plot
+costello_plot <- alveolata_summary |>
+  ggplot(aes(x = foo, y = rra)) +
+  geom_hex(binwidth = c(0.15, 0.15), col = "black") +
+  scale_fill_gradient(
+    low = "white",
+    high = "#3A1772",
+    limits = c(1, 25),
+    name = "# Order"
+  ) +
+  geom_text_repel(
+    data = label_df,
+    aes(label = label),
+    min.segment.length = 0,
+    force = 5,
+    seed = 100
+  ) +
+  geom_point(data = label_df) +
+  facet_grid(organism ~ survey) +
+  coord_fixed(xlim = c(-0.1, 1.1), ylim = c(-0.1, 1.1)) +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    strip.background = element_rect(color = "black", fill = NA)
+  ) +
+  labs(x = "Frequency of occurrence", y = "RRA")
+
+# create the table that can be used as a legend for the label and taxa
+load_or_install("gridExtra")
+table_grob <- label_df |>
+  select(Order, label) |>
+  unique() |>
+  tableGrob(rows = NULL)
+
+# Combine the plot to the table
+load_or_install("patchwork")
+costello_plot_legend <- costello_plot +
+  table_grob +
+  plot_layout(widths = c(2, .5))
+ggsave(
+  plot = costello_plot_legend,
+  filename = file.path("output", "figure", "costello.pdf"),
+  width = 10,
+  height = 5
+)
+
+# Compute the eDNA index (Winsconsin standardization)
+alveolata_rra_avg <- alveolata_data |>
+  pivot_wider(names_from = Order, values_from = rra, values_fill = 0) |>
+  pivot_longer(
+    cols = where(is.numeric),
+    names_to = "Order",
+    values_to = "rra"
+  ) |>
+  group_by(organism, survey, Order) |>
+  summarise(avg_rra = mean(rra), .groups = "drop_last") |>
+  mutate(avg_rra = avg_rra / sum(avg_rra)) |>
+  ungroup()
+
+edna_plot <-
+  alveolata_rra_avg |>
+  group_by(Order) |>
+  mutate(avg_eDNA = avg_rra / max(avg_rra)) |>
+  ungroup() |>
+  ggplot(aes(x = organism, y = Order, fill = avg_eDNA)) +
+  geom_tile(col = "black") +
+  scale_fill_viridis_c(name = "eDNA index") +
+  facet_grid(. ~ survey) +
+  coord_fixed() +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(color = "black", fill = NA)
+  ) +
+  labs(x = NULL, y = NULL)
+ggsave(
+  filename = file.path("output", "figure", "order_edna.pdf"),
+  plot = edna_plot,
+  width = 5,
+  height = 6
+)
+#rra plot
+rra_plot <-
+  alveolata_rra_avg |>
+  ggplot(aes(x = organism, y = Order, fill = avg_rra)) +
+  geom_tile(col = "black") +
+  scale_fill_viridis_c(name = "RRA") +
+  facet_grid(. ~ survey) +
+  coord_fixed() +
+  theme_bw() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(color = "black", fill = NA)
+  ) +
+  labs(x = NULL, y = NULL)
+ggsave(
+  filename = file.path("output", "figure", "order_rra.pdf"),
+  plot = rra_plot,
+  width = 5,
+  height = 6
+)
+
+## Correlation between diet and alveolata ----
+diet_df <- fish_data |>
+  mutate(
+    prey = ifelse(
+      Family == "Rotifera_XX",
+      "Rotifera",
+      ifelse(Family %in% c("Branchiopoda"), "Branchiopoda", Genus)
+    )
+  ) |>
+  filter(
+    prey %in%
+      c(
+        "Rotifera",
+        "Acartia",
+        "Centropages",
+        "Branchiopoda",
+        "Eurytemora",
+        "Pseudocalanus",
+        "Temora"
+      ),
+    library_ID %in% unique(alveolata_data$library_ID)
+  ) |>
+  group_by(library_ID) |>
+  mutate(rra = Abundance / sum(Abundance)) |>
+  ungroup() |>
+  group_by(library_ID, organism, survey, prey) |>
+  summarise(rra = sum(rra), .groups = "drop") |>
+  # Ensure that not detected prey are = 0
+  pivot_wider(names_from = prey, values_from = rra, values_fill = 0) |>
+  pivot_longer(
+    cols = where(is.numeric),
+    values_to = "rra",
+    names_to = "prey"
+  ) |>
+  # compute eDNA index
+  group_by(prey) |>
+  mutate(eDNA = rra / max(rra)) |>
+  ungroup()
+alveolata_df <-
+  alveolata_data |>
+  pivot_wider(names_from = Order, values_from = rra, values_fill = 0) |>
+  pivot_longer(
+    cols = where(is.numeric),
+    names_to = "Order",
+    values_to = "rra"
+  ) |>
+  group_by(Order) |>
+  mutate(eDNA = rra / max(rra)) |>
+  ungroup()
+# correlation with rra
+alveolata_rra_df <- alveolata_df |>
+  select(-eDNA) |>
+  pivot_wider(names_from = Order, values_from = rra) |>
+  arrange(library_ID)
+diet_rra_df <- diet_df |>
+  select(-eDNA) |>
+  pivot_wider(names_from = prey, values_from = rra) |>
+  arrange(library_ID)
+# Check that the row are the same
+if (!isTRUE(unique(alveolata_rra_df$library_ID == diet_rra_df$library_ID)))
+  message("matrices are not matching")
+# transform to matrix
+alveolata_rra_mat <-
+  alveolata_rra_df |>
+  select(-c(1:3)) |>
+  as.matrix()
+diet_rra_mar <-
+  diet_rra_df |>
+  select(-c(1:3)) |>
+  as.matrix()
+stopifnot(nrow(alveolata_rra_mat) == nrow(diet_rra_mar))
+
+cor_p_rra <-
+  expand.grid(
+    prey = colnames(diet_rra_mar),
+    alveolata = colnames(alveolata_rra_mat)
+  ) |>
+  rowwise() |>
+  mutate(
+    correlation = cor(
+      diet_rra_mar[, prey],
+      alveolata_rra_mat[, alveolata],
+      method = "kendall"
+    ),
+    p_value = cor.test(
+      diet_rra_mar[, prey],
+      alveolata_rra_mat[, alveolata],
+      method = "kendall"
+    )$p.value
+  ) |>
+  ungroup() |>
+  mutate(
+    p_adj = p.adjust(p_value, method = "fdr"),
+    sign = ifelse(
+      p_adj <= 0.001,
+      "***",
+      ifelse(
+        p_adj > 0.001 & p_adj <= 0.01,
+        "**",
+        ifelse(p_adj > 0.01 & p_adj <= 0.05, "*", "")
+      )
+    )
+  )
+
+cor_plot <- cor_p_rra |>
+  ggplot(aes(
+    y = reorder(alveolata, abs(correlation)),
+    x = reorder(prey, -abs(correlation)),
+    fill = correlation,
+    label = sign
+  )) +
+  geom_tile(col = "white") +
+  geom_text(col = "white") +
+  scale_fill_gradient2(
+    low = "#44CF6C",
+    mid = "black",
+    high = "#FFBB33",
+    midpoint = 0
+  ) +
+  scale_size_continuous(range = c(1, 10)) +
+  coord_fixed() +
+
+  theme_void() +
+  theme(
+    axis.text.y = element_text(color = "black", hjust = 1),
+    axis.text.x = element_text(
+      color = "black",
+      angle = 90,
+      vjust = 0.5,
+      hjust = 1
+    )
+  )
+ggsave(
+  plot = cor_plot,
+  filename = file.path("output", "figure", "kendall_correlation.pdf"),
+  width = 5.5,
+  height = 7
 )
