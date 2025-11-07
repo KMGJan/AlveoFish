@@ -229,8 +229,8 @@ fish_data <-
     by = join_by(month)
   ) |>
   mutate(survey = paste(month_abb, year)) |>
-  # remove fish reads
-  filter(Family != "Teleostei") |>
+  # remove reads assigned to craniates and the ones that were not assigned at the division level
+  filter(Class != "Craniata", !is.na(Division)) |>
   # filter out the samples with less than 10'000 reads
   group_by(library_ID) |>
   filter(sum(Abundance) > 10000) |>
