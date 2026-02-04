@@ -437,7 +437,8 @@ label_df <-
 load_or_install("ggrepel")
 
 # Plot the costello-plot
-costello_plot <- alveolata_summary |>
+costello_plot <-
+  alveolata_summary |>
   ggplot(aes(x = foo, y = rra)) +
   geom_hex(binwidth = c(0.15, 0.15), col = "black") +
   scale_fill_gradient(
