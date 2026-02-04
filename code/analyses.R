@@ -236,7 +236,7 @@ fish_data <-
   filter(sum(Abundance) > 10000) |>
   ungroup()
 
-## Metazoans vs non-metazoans ----
+## Metazoans vs non-metazoans ---- The proportion of the diet that is not metazoans
 summary_metazoa <- fish_data |>
   mutate(diet = case_when(Subdivision == "Metazoa" ~ TRUE, .default = FALSE)) |>
   group_by(library_ID, diet, organism, survey) |>
@@ -293,6 +293,7 @@ ggsave(
   height = 4
 )
 
+metazoa_prop
 ## Focus on the non-metazoans ----
 nonmetazoan_data <- fish_data |>
   mutate(diet = case_when(Subdivision == "Metazoa" ~ TRUE, .default = FALSE)) |>
@@ -328,6 +329,9 @@ ggsave(
   height = 5
 )
 
+barplot_non_metazoan_rra
+
+# This will make a table for the % of the things in the gut
 summary_non_metazoan |>
   mutate(rra = round(rra, 3)) |>
   pivot_wider(names_from = Division, values_from = rra, values_fill = 0) |>
@@ -393,6 +397,8 @@ ggsave(
   height = 6
 )
 
+alveolata_foo_plot
+
 # Combine average rra with foo for plotting the costello-plot
 alveolata_summary <-
   nonmetazoan_data |>
@@ -419,6 +425,7 @@ alveolata_summary <-
     values_to = "rra"
   ) |>
   left_join(alveolata_foo, by = join_by(organism, survey, Order))
+
 
 # Create a data frame with labels for the taxa that have a rra > 0.5 or a foo > 0.5
 label_df <-
@@ -463,6 +470,8 @@ costello_plot <- alveolata_summary |>
   ) +
   labs(x = "Frequency of occurrence", y = "RRA")
 
+costello_plot
+
 # create the table that can be used as a legend for the label and taxa
 load_or_install("gridExtra")
 table_grob <- label_df |>
@@ -481,7 +490,7 @@ ggsave(
   width = 10,
   height = 5
 )
-
+costello_plot_legend
 # Compute the eDNA index (Winsconsin standardization)
 alveolata_rra_avg <- alveolata_data |>
   pivot_wider(names_from = Order, values_from = rra, values_fill = 0) |>
@@ -518,6 +527,7 @@ ggsave(
   width = 5,
   height = 6
 )
+edna_plot
 #rra plot
 rra_plot <-
   alveolata_rra_avg |>
@@ -539,6 +549,7 @@ ggsave(
   width = 5,
   height = 6
 )
+rra_plot
 
 ## Correlation between diet and alveolata ----
 diet_df <- fish_data |>
@@ -678,3 +689,4 @@ ggsave(
   width = 5.5,
   height = 7
 )
+cor_plot
