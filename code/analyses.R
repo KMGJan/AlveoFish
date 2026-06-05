@@ -233,7 +233,7 @@ fish_data <-
     tibble(month_abb = month.abb, month = 1:12),
     by = join_by(month)
   ) |>
-  mutate(survey = paste(month_abb, year)) |>
+  mutate(survey = paste(month_abb)) |>
   # remove reads assigned to craniates and the ones that were not assigned at the division level or were Fungi
   filter(Class != "Craniata", !is.na(Division), Subdivision != "Fungi") |>
   # filter out the samples with less than 10'000 reads
@@ -285,14 +285,14 @@ metazoa_prop <-
   ) +
   geom_point(position = position_dodge(width = .7), size = 3) +
   scale_fill_manual(
-    values = c("#222E50", "#C9D8AB", "#699051", "#994636"),
+    values = c("#222E50", "#699051", "#994636"),
     name = ""
   ) +
   scale_color_manual(
-    values = c("#222E50", "#C9D8AB", "#699051", "#994636"),
+    values = c("#222E50", "#699051", "#994636"),
     name = ""
   ) +
-  scale_shape_manual(values = c(22, 23, 23, 25), name = "") +
+  scale_shape_manual(values = c(22, 23, 25), name = "") +
   labs(x = NULL, y = "Proportion of non-metazoans reads (%; mean ± sd)") +
   theme_bw() +
   theme(panel.grid = element_blank())
