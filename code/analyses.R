@@ -211,9 +211,7 @@ ggsave(
 # Detach packages and files not needed anymore
 rm(
   baltic_sea_shp,
-  fish_shp,
   map,
-  rectangle_shp,
   station_coordinates,
   survey_shp
 )
@@ -321,10 +319,28 @@ summary_non_metazoan <-
 barplot_non_metazoan_rra <-
   summary_non_metazoan |>
   ggplot(aes(x = organism, y = rra, fill = Division)) +
-  geom_bar(stat = "identity") +
+  geom_bar(stat = "identity", col = 'black') +
   facet_grid(. ~ survey) +
   scale_y_continuous(expand = c(0, 0)) +
   scale_x_discrete(expand = c(0, 0)) +
+  scale_fill_manual(
+    values = c(
+      "#D7263D",
+      "#33658A",
+      "#F6AE2D",
+      "#86BBD8",
+      "#F26419",
+      "#13070C",
+      "#6B4D57",
+      "#DDC8C4",
+      "#66C2A5",
+      "#758E4F",
+      "#E78AC3",
+      "#EDD9A3",
+      "#1B9E77",
+      "#666666"
+    )
+  ) +
   theme_bw() +
   theme(
     panel.grid = element_blank(),
@@ -426,12 +442,14 @@ load_or_install("ggrepel")
 # Plot the costello-plot
 costello_plot <-
   nm_summary |>
+
   ggplot(aes(x = foo, y = rra)) +
   geom_hex(binwidth = c(0.15, 0.15), col = "black") +
   scale_fill_gradient(
     low = "white",
     high = "#3A1772",
     limits = c(1, 75),
+    breaks = c(1, 25, 50),
     name = "# Order"
   ) +
   geom_text_repel(
@@ -463,6 +481,7 @@ load_or_install("patchwork")
 costello_plot_legend <- costello_plot +
   table_grob +
   plot_layout(widths = c(2, .5))
+
 ggsave(
   plot = costello_plot_legend,
   filename = file.path("output", "figure", "costello.pdf"),
@@ -628,12 +647,12 @@ cor_plot <- cor_p_rra |>
       fct_rev()
   ) |>
   ggplot(aes(
-    y = protist,
-    x = reorder(diet, -abs(correlation)),
+    x = reorder(protist, -abs(correlation)),
+    y = reorder(diet, abs(correlation)),
     fill = kendallT,
     label = sign
   )) +
-  geom_tile(col = "white") +
+  geom_tile(col = "black") +
   geom_text(col = "white") +
   scale_fill_manual(
     values = c('#0571b0', '#92c5de', '#f7f7f7', '#f4a582', '#ca0020')
@@ -654,7 +673,6 @@ cor_plot <- cor_p_rra |>
 ggsave(
   plot = cor_plot,
   filename = file.path("output", "figure", "kendall_correlation.pdf"),
-  width = 5.5,
-  height = 7
+  height = 5.5,
+  width = 7
 )
-# This is a comment
